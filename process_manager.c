@@ -19,6 +19,8 @@ int run_basic_demo(void) {
     producer_pid = fork();
     if(producer_pid < 0) {
         perror("Producer fork failed");
+        close(pipe_fd[0]);
+        close(pipe_fd[1]);
         return -1;
     }
     else if (producer_pid == 0) {
@@ -31,6 +33,8 @@ int run_basic_demo(void) {
     consumer_pid = fork();
     if(consumer_pid < 0) {
         perror("Consumer Fork failed");
+        close(pipe_fd[0]);
+        close(pipe_fd[1]);
         return -1;
     }
     else if (consumer_pid == 0) {
@@ -38,16 +42,29 @@ int run_basic_demo(void) {
         consumer_process(pipe_fd[0], 0);
     }
     else {
-        printf("Created consumer child (PID: %d)\n", producer_pid);
+        printf("Created consumer child (PID: %d)\n", consumer_pid);
     }
 
     close(pipe_fd[0]);
     close(pipe_fd[1]);
-    waitpid(producer_pid, &status, 0);
-        printf("Producer child (PID: %d) exited with status %d\n", producer_pid, status);
-    waitpid(consumer_pid,  &status, 0);
-        printf("Consumer child (PID: %d) exited with status %d\n", consumer_pid, status);
 
+    pid_t child_pid = waitpid(producer_pid, &status, 0);
+    if(child_pid < 0) {
+        perror("Producer child waitpid failed");
+    }
+    else {
+        printf("Producer child (PID: %d) exited with status %d\n", child_pid, status);
+    }
+
+    child_pid = waitpid(consumer_pid,  &status, 0);
+    if(child_pid < 0) {
+        perror("Consumer child waitpid failed");
+    }
+    else {
+        printf("Consumer child (PID: %d) exited with status %d\n", child_pid, status);
+    }
+
+    printf("\nSUCCESS: Basic producer-consumer completed!\n");
     return 0;
 }
 
@@ -70,32 +87,36 @@ int run_multiple_pairs(int num_pairs) {
 
         printf("\nPair %d\n", i + 1);
 
-        pid_t producer_pid = fork();
-        if(producer_pid < 0) {
+        pid_t prod_pid = fork();
+        if(prod_pid < 0) {
             perror("Producer fork failed");
+            close(pipe_fd[0]);
+            close(pipe_fd[1]);
             return -1;
         }
-        else if (producer_pid == 0) {
+        else if (prod_pid == 0) {
             close(pipe_fd[0]);
             producer_process(pipe_fd[1], i * 5 + 1);
         }
         else {
-            pids[pid_count++] = producer_pid;
-            printf("Created consumer (PID: %d)\n", producer_pid);
+            pids[pid_count++] = prod_pid;
+            printf("Created producer (PID: %d)\n", prod_pid);
         }
 
-        pid_t consumer_pid = fork();
-        if(consumer_pid < 0) {
+        pid_t cons_pid = fork();
+        if(cons_pid < 0) {
             perror("Consumer fork failed");
+            close(pipe_fd[0]);
+            close(pipe_fd[1]);
             return -1;
         }
-        else if (consumer_pid == 0) {
+        else if (cons_pid == 0) {
             close(pipe_fd[1]);
-            consumer_process(pipe_fd[0], i * 5 + 1);
+            consumer_process(pipe_fd[0], i + 1);
         }
         else {
-            pids[pid_count++] = producer_pid;
-            printf("Created consumer (PID: %d)\n", producer_pid);
+            pids[pid_count++] = cons_pid;
+            printf("Created consumer (PID: %d)\n", cons_pid);
         }
 
         close(pipe_fd[0]);
@@ -103,8 +124,13 @@ int run_multiple_pairs(int num_pairs) {
     }
 
     for(int i = 0; i < pid_count; i++) {
-        waitpid(pids[i], &status, 0);
-        printf("Child (PID: %d) exited with status %d\n", pids[i], status);
+        pid_t child_pid = waitpid(pids[i], &status, 0);
+        if(child_pid == -1) {
+            perror("Child waitpid failed");
+        }
+        else {
+            printf("Child (PID: %d) exited with status %d\n", child_pid, status);
+        }
     }
 
     printf("\nAll pairs completed successfully!\n");
@@ -116,7 +142,7 @@ int run_multiple_pairs(int num_pairs) {
  */
 void producer_process(int write_fd, int start_num) {
     printf("Producer (PID: %d) starting...\n", getpid());
-    
+
     // Send 5 numbers: start_num, start_num+1, start_num+2, start_num+3, start_num+4
     for (int i = 0; i < NUM_VALUES; i++) {
         int number = start_num + i;
@@ -144,7 +170,7 @@ void consumer_process(int read_fd, int pair_id) {
     int sum = 0;
     
     printf("Consumer (PID: %d) starting...\n", getpid());
-    
+
     // Read numbers until pipe is closed
     while (read(read_fd, &number, sizeof(number)) > 0) {
         count++;
